@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "611369157715",
+    "project_id": "marketmboa-b33f9",
+    "storage_bucket": "marketmboa-b33f9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:611369157715:android:ef7f801943afbea134f2a6",
+        "android_client_info": {
+          "package_name": "com.example.marketmboafront"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDmVGxYh3sA44we3opJgGmfJQwFZbgm__U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
