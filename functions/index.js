@@ -302,10 +302,143 @@ exports.cinetpayNotify = functions.https.onRequest(async (req, res) => {
       .firestore()
       .collection('payments')
       .doc(transaction_id)
-      .set(
-        { status: (status || '').toLowerCase(), webhook: req.body },
-        { merge: true }
-      );
+      .set({ status: (status || 'unknown').toLowerCase() }, { merge: true });
+    res.status(200).send('OK');
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// =========================
+// NotchPay (agrégateur recommandé)
+// =========================
+const NOTCHPAY_PUBLIC_KEY =
+  process.env.NOTCHPAY_PUBLIC_KEY ||
+  (functions.config().notchpay && functions.config().notchpay.public_key) ||
+  'pk_test.scDIlmLZpBHVNDmoRfq5oq5bpa89f7XWuOnHnqhTjtGD0XEazNSNoLFo2BGNnwj86k8dG9RxwW96B3blRIDTTww4eRQIGT5YJi3hr0l9o6L9MpBYlyMOJAuu9rC4Z';
+const NOTCHPAY_SECRET_KEY =
+  process.env.NOTCHPAY_SECRET_KEY ||
+  (functions.config().notchpay && functions.config().notchpay.secret_key) ||
+  'sk_test.a2U5ChNU6oSJsc0vj2D5HR4LAeXoWQAivkWhmMTkPS3PIYTPOvPUmY7uJ79zVvMiO8mJYeiDZCDsXSRh4cPdcVPuUGlhdMzN1w95yWuQq9st1OOJ2IXHZ3akEjkp6';
+const NOTCHPAY_BASE = 'https://api.notchpay.co';
+
+exports.notchpayInit = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+  try {
+    const { amount, currency, email, name, phone, reference, description } = req.body || {};
+    if (!amount || !currency || !email || !reference) {
+      res.status(400).json({ error: 'Missing fields (amount, currency, email, reference are required)' });
+      return;
+    }
+
+    const payload = {
+      amount: Number(amount),
+      currency: currency || 'XAF',
+      email: email,
+      name: name || 'Client MarketMboa',
+      phone: phone || '',
+      reference: reference,
+      description: description || 'Paiement MarketMboa',
+      callback: `https://marketmboa.web.app/payment-callback?ref=${reference}`, // URL de retour après paiement
+    };
+
+    const initRes = await fetch(`${NOTCHPAY_BASE}/payments/initialize`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': NOTCHPAY_PUBLIC_KEY, // NotchPay utilise la clé publique pour l'init
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const initData = await initRes.json();
+
+    if (!initRes.ok) {
+      res.status(initRes.status).json(initData);
+      return;
+    }
+
+    // Sauvegarder dans Firestore
+    await admin.firestore().collection('payments').doc(reference).set({
+      provider: 'notchpay',
+      amount: Number(amount),
+      currency: currency,
+      email: email,
+      status: 'pending',
+      notchpayRef: initData.transaction?.reference || '',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    res.json({
+      paymentUrl: initData.authorization_url,
+      reference: reference,
+      message: 'Paiement NotchPay initié'
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+exports.notchpayStatus = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'GET') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+  try {
+    const reference = req.query.ref || req.path.split('/').pop();
+    if (!reference) {
+      res.status(400).json({ error: 'Missing reference' });
+      return;
+    }
+
+    // NotchPay demande la clé secrète pour vérifier le statut
+    const sRes = await fetch(`${NOTCHPAY_BASE}/payments/${reference}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': NOTCHPAY_SECRET_KEY,
+        'Accept': 'application/json',
+      },
+    });
+
+    const sData = await sRes.json();
+    if (!sRes.ok) {
+      res.status(sRes.status).json(sData);
+      return;
+    }
+
+    const status = (sData.payment?.status || 'pending').toLowerCase();
+    
+    // Mettre à jour Firestore
+    await admin.firestore().collection('payments').doc(reference).set({
+      status: status,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      providerResp: sData
+    }, { merge: true });
+
+    res.json({ status, details: sData });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+exports.notchpayWebhook = functions.https.onRequest(async (req, res) => {
+  // TODO: Vérifier la signature X-Notch-Signature pour la sécurité
+  try {
+    const event = req.body;
+    const reference = event.data?.reference;
+    const status = event.data?.status;
+
+    if (reference && status) {
+      await admin.firestore().collection('payments').doc(reference).set({
+        status: status.toLowerCase(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        webhookData: event
+      }, { merge: true });
+    }
     res.status(200).send('OK');
   } catch (e) {
     res.status(500).send(String(e));

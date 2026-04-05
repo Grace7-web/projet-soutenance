@@ -153,6 +153,19 @@ class ApiService {
         'current_user_receive_notifications', receiveNotifications);
     await prefs.setBool(
         'current_user_receive_partner_comms', receivePartnerComms);
+
+    // Sauvegarde dans Firestore
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'username': username,
+        'firstName': firstName ?? '',
+        'lastName': lastName ?? '',
+        'receiveNotifications': receiveNotifications,
+        'receivePartnerComms': receivePartnerComms,
+      }, SetOptions(merge: true));
+    }
+
     final token = 'local_token_${DateTime.now().millisecondsSinceEpoch}';
     await saveToken(token);
     return {'success': true, 'token': token};
@@ -165,12 +178,14 @@ class ApiService {
     final firstName = prefs.getString('current_user_first_name') ?? '';
     final lastName = prefs.getString('current_user_last_name') ?? '';
     final phone = prefs.getString('current_user_phone') ?? '';
+    final role = prefs.getString('current_user_role') ?? 'user';
     return {
       'id': id,
       'username': username,
       'firstName': firstName,
       'lastName': lastName,
       'phone': phone,
+      'role': role,
     };
   }
 
@@ -189,9 +204,45 @@ class ApiService {
   Future<Map<String, dynamic>> login(String email) async {
     final prefs = await _prefs();
     await prefs.setString('current_user_email', email);
+
+    // Tentative de récupération depuis Firestore
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final doc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        if (data.containsKey('username')) {
+          await prefs.setString('current_user_username', data['username']);
+          await prefs.setString(
+              'current_user_first_name', data['firstName'] ?? '');
+          await prefs.setString(
+              'current_user_last_name', data['lastName'] ?? '');
+          await prefs.setString('current_user_phone', data['phone'] ?? '');
+          final role = data['role'] ?? 'user';
+          await prefs.setString('current_user_role', role);
+          final isBlocked = data['isBlocked'] ?? false;
+          if (isBlocked) {
+            return {
+              'success': false,
+              'message': 'Votre compte a été bloqué par l\'administrateur.'
+            };
+          }
+          final token = 'local_token_${DateTime.now().millisecondsSinceEpoch}';
+          await saveToken(token);
+          return {
+            'success': true,
+            'token': token,
+            'isComplete': true,
+            'username': data['username']
+          };
+        }
+      }
+    }
+
     final token = 'local_token_${DateTime.now().millisecondsSinceEpoch}';
     await saveToken(token);
-    return {'success': true, 'token': token};
+    return {'success': true, 'token': token, 'isComplete': false};
   }
 
   Future<Map<String, dynamic>> createListing({
@@ -200,6 +251,9 @@ class ApiService {
     required double price,
     required String color,
     required String condition,
+    required int conditionPercentage,
+    String? uniqueId,
+    required String category,
     required List<File> photos,
     String? firstName,
     String? lastName,
@@ -228,7 +282,9 @@ class ApiService {
       'price': price,
       'color': color,
       'condition': condition,
-      'category': 'general',
+      'conditionPercentage': conditionPercentage,
+      'uniqueId': uniqueId,
+      'category': category,
       'isDonation': price == 0,
       'status': 'active',
       'photos': photoUrls.map((u) => {'url': u}).toList(),
@@ -288,7 +344,7 @@ class ApiService {
       throw Exception('URL Cloudinary manquante');
     }
     return url;
-    }
+  }
 
   Future<List> getAllListings() async {
     try {
@@ -306,6 +362,8 @@ class ApiService {
           'price': data['price'],
           'color': data['color'],
           'condition': data['condition'],
+          'conditionPercentage': data['conditionPercentage'],
+          'uniqueId': data['uniqueId'],
           'category': data['category'],
           'isDonation': data['isDonation'] ?? false,
           'status': data['status'] ?? 'active',
@@ -352,8 +410,9 @@ class ApiService {
         }
         final sf = (data['sellerFirstName'] as String?) ?? '';
         final sl = (data['sellerLastName'] as String?) ?? '';
-        final name = (sf + ' ' + sl).trim();
-        sellerName = name.isNotEmpty ? name : (data['username'] as String?) ?? 'Vendeur';
+        final name = ('$sf $sl').trim();
+        sellerName =
+            name.isNotEmpty ? name : (data['username'] as String?) ?? 'Vendeur';
       }
     } catch (_) {}
     sellerUid ??= 'local_$sellerUserId';
@@ -397,15 +456,29 @@ class ApiService {
   Future<void> sendMessage(String conversationId, String text,
       {String? senderUid}) async {
     final uid = senderUid ?? FirebaseAuth.instance.currentUser?.uid ?? 'local';
+
+    // Récupérer les participants pour trouver le destinataire
+    final convDoc = await FirebaseFirestore.instance
+        .collection('conversations')
+        .doc(conversationId)
+        .get();
+    final participants =
+        List<String>.from(convDoc.data()?['participants'] ?? []);
+    final receiverId =
+        participants.firstWhere((id) => id != uid, orElse: () => '');
+
     await FirebaseFirestore.instance
         .collection('conversations')
         .doc(conversationId)
         .collection('messages')
         .add({
       'senderUid': uid,
+      'receiverId': receiverId,
       'text': text,
       'at': FieldValue.serverTimestamp(),
+      'read': false,
     });
+
     await FirebaseFirestore.instance
         .collection('conversations')
         .doc(conversationId)
@@ -488,6 +561,9 @@ class ApiService {
         'image': photoUrl,
         'category': listing['category'] ?? 'général',
         'description': listing['description'] ?? '',
+        'condition': listing['condition'],
+        'conditionPercentage': listing['conditionPercentage'],
+        'uniqueId': listing['uniqueId'],
       };
     }).toList();
   }
@@ -512,7 +588,12 @@ class ApiService {
           final data = d.data();
           final photoUrl =
               data['photoUrl'] ?? 'https://via.placeholder.com/400';
-          return {...data, 'photoUrl': photoUrl};
+          return {
+            ...data,
+            'photoUrl': photoUrl,
+            'conditionPercentage': data['conditionPercentage'],
+            'uniqueId': data['uniqueId'],
+          };
         }).toList();
       }
     } catch (_) {}
@@ -560,12 +641,125 @@ class ApiService {
       'createdAt': FieldValue.serverTimestamp(),
     };
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('orders')
-          .add(order);
+      final doc =
+          await FirebaseFirestore.instance.collection('orders').add(order);
       return {'id': doc.id, ...order};
     } catch (e) {
       return {'error': e.toString()};
+    }
+  }
+
+  Future<bool> deleteListing(int listingId) async {
+    try {
+      // 1. Supprimer de Firestore
+      await FirebaseFirestore.instance
+          .collection('listings')
+          .doc(listingId.toString())
+          .delete();
+
+      // 2. Supprimer du cache local SharedPreferences
+      final prefs = await _prefs();
+
+      // Supprimer de user_listings
+      final userListingsStr = prefs.getString('user_listings');
+      if (userListingsStr != null) {
+        List<dynamic> userListings = jsonDecode(userListingsStr);
+        userListings.removeWhere((l) => l['id'] == listingId);
+        await prefs.setString('user_listings', jsonEncode(userListings));
+      }
+
+      // Supprimer de all_listings
+      final allListingsStr = prefs.getString('all_listings');
+      if (allListingsStr != null) {
+        List<dynamic> allListings = jsonDecode(allListingsStr);
+        allListings.removeWhere((l) => l['id'] == listingId);
+        await prefs.setString('all_listings', jsonEncode(allListings));
+      }
+
+      // Supprimer des favoris si présent
+      final favoriteIdsStr = prefs.getString('favorite_ids');
+      if (favoriteIdsStr != null) {
+        List<dynamic> favoriteIds = jsonDecode(favoriteIdsStr);
+        favoriteIds.removeWhere((id) => id == listingId);
+        await prefs.setString('favorite_ids', jsonEncode(favoriteIds));
+      }
+
+      return true;
+    } catch (e) {
+      print('Erreur lors de la suppression : $e');
+      return false;
+    }
+  }
+
+  // --- Fonctions Admin ---
+
+  Future<List<Map<String, dynamic>>> getAllUsers() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('users').get();
+      return snap.docs.map((d) => {'uid': d.id, ...d.data()}).toList();
+    } catch (e) {
+      print('Erreur getAllUsers: $e');
+      return [];
+    }
+  }
+
+  Future<bool> updateUserStatus(String uid, bool isBlocked) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({'isBlocked': isBlocked});
+      return true;
+    } catch (e) {
+      print('Erreur updateUserStatus: $e');
+      return false;
+    }
+  }
+
+  Future<bool> updateListingStatus(int listingId, String status) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('listings')
+          .doc(listingId.toString())
+          .update({'status': status});
+
+      // Mettre à jour le cache local également si nécessaire
+      final prefs = await _prefs();
+      final allListingsStr = prefs.getString('all_listings');
+      if (allListingsStr != null) {
+        List<dynamic> allParsed = jsonDecode(allListingsStr);
+        for (var l in allParsed) {
+          if (l['id'] == listingId) {
+            l['status'] = status;
+          }
+        }
+        await prefs.setString('all_listings', jsonEncode(allParsed));
+      }
+
+      return true;
+    } catch (e) {
+      print('Erreur updateListingStatus: $e');
+      return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getListingsByStatus(String status) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('listings')
+          .where('status', isEqualTo: status)
+          .orderBy('createdAt', descending: true)
+          .get();
+      return snap.docs.map((d) {
+        final data = d.data();
+        return {
+          'id': data['id'] ?? int.tryParse(d.id) ?? d.id,
+          ...data,
+        };
+      }).toList();
+    } catch (e) {
+      print('Erreur getListingsByStatus: $e');
+      return [];
     }
   }
 }
