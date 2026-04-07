@@ -41,11 +41,19 @@ class _ConversationPageState extends State<ConversationPage> {
         .orderBy('at')
         .snapshots();
 
-    final title =
-        (widget.conversation['sellerName'] as String?)?.trim().isNotEmpty ==
-                true
-            ? widget.conversation['sellerName'] as String
-            : 'Conversation';
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    // ✅ CORRECTION LOGIQUE : Détecter l'autre participant
+    // Si je suis l'acheteur (buyerUid), l'autre est le vendeur (sellerName)
+    // Si je suis le vendeur (sellerUid), l'autre est l'acheteur (buyerName)
+    final isBuyer = widget.conversation['buyerUid'] == myUid;
+    
+    final otherName = isBuyer 
+        ? (widget.conversation['sellerName'] ?? 'Vendeur')
+        : (widget.conversation['buyerName'] ?? 'Acheteur');
+
+    final title = otherName.toString().trim().isNotEmpty
+        ? otherName.toString()
+        : 'Conversation';
 
     return Scaffold(
       appBar: AppBar(
@@ -82,41 +90,74 @@ class _ConversationPageState extends State<ConversationPage> {
                     final m = docs[index].data();
                     final myUid = FirebaseAuth.instance.currentUser?.uid;
                     final isMine = m['senderUid'] == myUid;
-                    return Align(
-                      alignment:
-                          isMine ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: isMine
-                              ? const Color(0xFF00897B)
-                              : Theme.of(context).colorScheme.surfaceVariant,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: isMine
-                              ? CrossAxisAlignment.end
-                              : CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              m['text'] ?? '',
-                              style: TextStyle(
-                                color: isMine ? Colors.white : null,
+                    return GestureDetector(
+                      onLongPress: isMine
+                          ? () async {
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Supprimer le message'),
+                                  content: const Text(
+                                      'Voulez-vous vraiment supprimer ce message ?'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(ctx, false),
+                                      child: const Text('Annuler'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      child: const Text('Supprimer',
+                                          style: TextStyle(color: Colors.red)),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (confirm == true) {
+                                await _api.deleteMessage(
+                                    widget.conversation['id'].toString(),
+                                    docs[index].id);
+                              }
+                            }
+                          : null,
+                      child: Align(
+                        alignment: isMine
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: isMine
+                                ? const Color(0xFF00897B)
+                                : Theme.of(context).colorScheme.surfaceVariant,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: isMine
+                                ? CrossAxisAlignment.end
+                                : CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                m['text'] ?? '',
+                                style: TextStyle(
+                                  color: isMine ? Colors.white : null,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _formatTime(m['at']),
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: isMine
-                                    ? Colors.white.withOpacity(0.7)
-                                    : Colors.grey[600],
+                              const SizedBox(height: 4),
+                              Text(
+                                _formatTime(m['at']),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: isMine
+                                      ? Colors.white.withOpacity(0.7)
+                                      : Colors.grey[600],
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     );

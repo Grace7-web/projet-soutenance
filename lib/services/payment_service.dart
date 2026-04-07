@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import '../config/payments_config.dart';
 
 class PaymentService {
+  // Service pour la gestion des paiements via MTN, Orange, CinetPay, NotchPay et plus
   Future<Map<String, dynamic>> startMtnPayment({
     required String phone,
     required double amount,
@@ -105,16 +106,14 @@ class PaymentService {
     String? phone,
     String? description,
   }) async {
-    // ✅ MODIFICATION: Utilisation de la clé de test NotchPay correcte
     final uri = Uri.parse('https://api.notchpay.co/payments/initialize');
-    const publicKey =
-        'pk_test.scDIlmLZpBHVNDmoRfq5oq5bpa89f7XWuOnHnqhTjtGD0XEazNSNoLFo2BGNnwj86k8dG9RxwW96B3blRIDTTww4eRQIGT5YJi3hr0l9o6L9MpBYlyMOJAuu9rC4Z';
 
     final res = await http.post(
       uri,
       headers: {
         'Content-Type': 'application/json',
-        'x-public-key': publicKey,
+        'Authorization': notchpayPublicKey,
+        'x-public-key': notchpayPublicKey,
         'Accept': 'application/json',
       },
       body: jsonEncode({
@@ -140,9 +139,14 @@ class PaymentService {
         'message': 'Paiement NotchPay initié'
       };
     }
-    
-    final errorData = jsonDecode(res.body);
-    throw Exception('Erreur NotchPay (${res.statusCode}): ${errorData['message'] ?? res.body}');
+
+    String errorMsg = res.body;
+    try {
+      final errorData = jsonDecode(res.body);
+      errorMsg = errorData['message'] ?? res.body;
+    } catch (_) {}
+
+    throw Exception('Erreur NotchPay (${res.statusCode}): $errorMsg');
   }
 
   Future<Map<String, dynamic>> getNotchPayStatus(String reference) async {

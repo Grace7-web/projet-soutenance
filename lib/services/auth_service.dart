@@ -23,10 +23,10 @@ class AuthService {
       _isLoggedIn = true;
       _userName = username;
       
-      await NotificationService.saveTokenToFirestore();
-      final id = prefs.getInt('current_user_id');
-      if (id != null) {
-        NotificationService.listenToMessages(id.toString());
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        NotificationService.listenToMessages(uid);
+        NotificationService.saveTokenToFirestore();
       }
     }
   }

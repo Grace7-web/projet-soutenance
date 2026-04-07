@@ -123,12 +123,13 @@ class _ListingModerationTabState extends State<ListingModerationTab> {
   }
 
   Future<void> _loadListings() async {
-    // On récupère toutes les annonces sans filtre de statut pour la modération
+    // On récupère toutes les annonces
     try {
+      // Note: Retrait du orderBy pour éviter que les docs sans createdAt ne fassent échouer la requête
       final snap = await FirebaseFirestore.instance
           .collection('listings')
-          .orderBy('createdAt', descending: true)
           .get();
+      
       final listings = snap.docs.map((d) {
         final data = d.data();
         return {
@@ -137,12 +138,32 @@ class _ListingModerationTabState extends State<ListingModerationTab> {
         };
       }).toList();
 
+      // Tri manuel pour éviter les erreurs Firestore si createdAt est manquant
+      listings.sort((a, b) {
+        final dateA = a['createdAt'];
+        final dateB = b['createdAt'];
+        if (dateA == null) return 1;
+        if (dateB == null) return -1;
+        try {
+          final timeA = dateA is DateTime ? dateA : dateA.toDate();
+          final timeB = dateB is DateTime ? dateB : dateB.toDate();
+          return timeB.compareTo(timeA);
+        } catch (_) {
+          return 0;
+        }
+      });
+
       setState(() {
         _listings = listings;
         _loading = false;
       });
     } catch (e) {
       print('Erreur _loadListings Admin: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur chargement: $e'), backgroundColor: Colors.red),
+        );
+      }
       setState(() => _loading = false);
     }
   }

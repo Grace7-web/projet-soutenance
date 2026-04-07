@@ -20,7 +20,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     final pages = [
       const HomePage(),
-      const MessagesPage(),
+      MessagesPage(),
       const PublishPage(),
       const FavoritesPage(),
       AccountPage(toggleTheme: widget.toggleTheme, themeMode: widget.themeMode),

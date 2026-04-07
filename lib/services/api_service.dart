@@ -443,6 +443,8 @@ class ApiService {
         'sellerUserId': sellerUserId,
         'sellerPhone': sellerPhone,
         'sellerName': sellerName ?? 'Vendeur',
+        'buyerName': me['username'] ?? 'Acheteur',
+        'buyerPhone': me['phone'],
         'lastMessageText': '',
         'lastMessageAt': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
@@ -687,6 +689,42 @@ class ApiService {
       return true;
     } catch (e) {
       print('Erreur lors de la suppression : $e');
+      return false;
+    }
+  }
+
+  Future<bool> deleteConversation(String conversationId) async {
+    try {
+      final convRef = FirebaseFirestore.instance
+          .collection('conversations')
+          .doc(conversationId);
+
+      // Supprimer les messages d'abord
+      final messages = await convRef.collection('messages').get();
+      for (var doc in messages.docs) {
+        await doc.reference.delete();
+      }
+
+      // Supprimer la conversation
+      await convRef.delete();
+      return true;
+    } catch (e) {
+      print('Erreur deleteConversation: $e');
+      return false;
+    }
+  }
+
+  Future<bool> deleteMessage(String conversationId, String messageId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('conversations')
+          .doc(conversationId)
+          .collection('messages')
+          .doc(messageId)
+          .delete();
+      return true;
+    } catch (e) {
+      print('Erreur deleteMessage: $e');
       return false;
     }
   }

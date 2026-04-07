@@ -291,6 +291,46 @@ exports.cinetpayStatus = functions.https.onRequest(async (req, res) => {
   }
 });
 
+/**
+ * Envoi de notification push lors d'un nouveau message
+ */
+exports.onNewMessage = functions.firestore
+  .document('conversations/{convId}/messages/{msgId}')
+  .onCreate(async (snap, context) => {
+    const message = snap.data();
+    const receiverId = message.receiverId;
+
+    if (!receiverId) return null;
+
+    // Récupérer le token FCM du destinataire
+    const userDoc = await admin.firestore().collection('users').doc(receiverId).get();
+    const userData = userDoc.data();
+
+    if (!userData || !userData.fcmToken) {
+      console.log('Aucun token FCM pour l\'utilisateur:', receiverId);
+      return null;
+    }
+
+    const payload = {
+      notification: {
+        title: 'Nouveau message de MarketMboa',
+        body: message.text || 'Vous avez reçu un message',
+        clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+      },
+      data: {
+        conversationId: context.params.convId,
+        type: 'chat'
+      }
+    };
+
+    try {
+      await admin.messaging().sendToDevice(userData.fcmToken, payload);
+      console.log('Notification envoyée avec succès');
+    } catch (error) {
+      console.error('Erreur envoi notification:', error);
+    }
+  });
+
 exports.cinetpayNotify = functions.https.onRequest(async (req, res) => {
   try {
     const { transaction_id, status } = req.body || {};

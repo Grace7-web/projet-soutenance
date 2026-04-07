@@ -368,29 +368,7 @@ class _PublishPageState extends State<PublishPage> {
             ],
           ),
           const SizedBox(height: 40),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: (_categoryImages['Vue de face'] != null &&
-                      _categoryImages['Vue arrière'] != null)
-                  ? _nextStep
-                  : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B35),
-                disabledBackgroundColor: Colors.grey[300],
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              child: const Text(
-                'Continuer',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white),
-              ),
-            ),
-          ),
+          _buildContinueButton(),
         ],
       ),
     );
@@ -1083,12 +1061,20 @@ class _PublishPageState extends State<PublishPage> {
   }
 
   Widget _buildContinueButton({String label = 'Continuer'}) {
+    bool canContinue = true;
+    if (_currentStep == 1) {
+      // Étape des photos: Vue de face et Vue arrière obligatoires
+      canContinue = _categoryImages['Vue de face'] != null &&
+          _categoryImages['Vue arrière'] != null;
+    }
+
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
-        onPressed: _nextStep,
+        onPressed: canContinue ? _nextStep : null,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFFF6B35),
+          disabledBackgroundColor: Colors.grey[300],
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'conversation_page.dart';
+import '../../../services/api_service.dart';
 
 class MessagesPage extends StatelessWidget {
-  const MessagesPage({super.key});
+  final ApiService _api = ApiService();
+
+  MessagesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -71,51 +74,78 @@ class MessagesPage extends StatelessWidget {
                         ],
                       ),
                     )
-                  : ListView.separated(
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(8),
                       itemCount: docs.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final doc = docs[index];
                         final c = {'id': doc.id, ...doc.data()};
-                        final title =
-                            (c['sellerName'] as String?)?.trim().isNotEmpty ==
-                                    true
-                                ? c['sellerName'] as String
-                                : 'Conversation';
+
+                        // ✅ CORRECTION LOGIQUE : Détecter l'autre participant
+                        // Si je suis l'acheteur (buyerUid), l'autre est le vendeur (sellerName)
+                        // Si je suis le vendeur (sellerUid), l'autre est l'acheteur (buyerName)
+                        final isBuyer = c['buyerUid'] == myUid;
+                        
+                        final otherName = isBuyer 
+                            ? (c['sellerName'] ?? 'Vendeur')
+                            : (c['buyerName'] ?? 'Acheteur');
+
+                        final title = otherName.toString().trim().isNotEmpty
+                            ? otherName.toString()
+                            : 'Conversation';
+
                         return ListTile(
-                          leading: const CircleAvatar(child: Icon(Icons.chat)),
-                          title: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              Text(
-                                _formatLastMessageTime(c['lastMessageAt']),
-                                style: TextStyle(
-                                    fontSize: 11, color: Colors.grey[600]),
-                              ),
-                            ],
+                          leading: CircleAvatar(
+                            backgroundColor: const Color(0xFF00897B),
+                            child: Text(
+                              title[0].toUpperCase(),
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ),
+                          title: Text(
+                            title,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           subtitle: Text(
-                            (c['lastMessageText'] as String?) ?? '',
+                            (c['lastMessageText'] as String?) ?? 'Aucun message',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Text(
+                            _formatLastMessageTime(c['lastMessageAt']),
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                           ),
                           onTap: () {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) =>
+                                builder: (context) =>
                                     ConversationPage(conversation: c),
                               ),
                             );
+                          },
+                          onLongPress: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Supprimer la conversation'),
+                                content: const Text('Voulez-vous vraiment supprimer cette conversation et tous ses messages ?'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('Annuler'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
+                                  ),
+                                ],
+                              ),
+                            );
+
+                            if (confirm == true) {
+                               await _api.deleteConversation(doc.id);
+                             }
                           },
                         );
                       },
